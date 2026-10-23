@@ -995,7 +995,7 @@ with tab_assistant:
                 col_c1, col_c2, col_c3, col_c4 = st.columns([1.5, 1, 1, 3])
                 with col_c1:
                     with st.popover("📋 Copy Text", use_container_width=True):
-                        st.text_area("Answer Text", value=ans_text, height=120)
+                        st.text_area("Answer Text", value=ans_text, height=120, key=f"copy_text_area_{idx}")
                 with col_c2:
                     if st.button("👍 Helpful", key=f"helpful_{idx}", use_container_width=True):
                         msg["feedback"] = "helpful"
