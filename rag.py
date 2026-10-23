@@ -4,6 +4,7 @@ RAG Retrieval & QA Backend for Enso Group HR Policy Assistant
 """
 
 import os
+import time
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
@@ -42,6 +43,13 @@ _CACHED_VECTORSTORE = None
 _CACHED_KEY = None
 
 
+def clear_vectorstore_cache():
+    """Clears the cached Chroma vector store instance."""
+    global _CACHED_VECTORSTORE, _CACHED_KEY
+    _CACHED_VECTORSTORE = None
+    _CACHED_KEY = None
+
+
 def get_vectorstore(api_key: str = None, persist_dir: str = DEFAULT_PERSIST_DIR):
     """Loads and caches existing ChromaDB vector store."""
     global _CACHED_VECTORSTORE, _CACHED_KEY
@@ -71,14 +79,14 @@ def get_chat_model(api_key: str = None):
     os.environ["GOOGLE_API_KEY"] = clean_key
     os.environ.pop("GEMINI_API_KEY", None)
 
-    model_name = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.8-flash")
+    model_name = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash")
     try:
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=clean_key,
             temperature=0.0,
             max_retries=2,
-            timeout=20,
+            timeout=30,
         )
     except Exception as e:
         err_str = str(e)
@@ -92,6 +100,8 @@ def answer_question(
     api_key: str = None,
     persist_dir: str = DEFAULT_PERSIST_DIR,
     top_k: int = 4,
+    vectorstore: Any = None,
+    chat_model: Any = None,
 ) -> Dict[str, Any]:
     """
     Retrieves top_k chunks and answers the HR question.
@@ -125,9 +135,13 @@ def answer_question(
     resolved_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
 
     try:
-        vectorstore = get_vectorstore(api_key=api_key, persist_dir=persist_dir)
+        t_retrieval_start = time.perf_counter()
+        if vectorstore is None:
+            vectorstore = get_vectorstore(api_key=api_key, persist_dir=persist_dir)
         retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
         docs = retriever.invoke(clean_q)
+        t_retrieval = time.perf_counter() - t_retrieval_start
+        print(f"[RAG] Retrieval for query '{clean_q[:35]}...' completed in {t_retrieval:.2f}s ({len(docs)} chunks)")
 
         if not docs:
             return {
@@ -153,9 +167,29 @@ def answer_question(
         context_str = "\n\n---\n\n".join(formatted_chunks)
         prompt = SYSTEM_PROMPT.format(context=context_str, question=clean_q)
 
-        llm = get_chat_model(api_key=api_key)
+        t_llm_start = time.perf_counter()
+        if chat_model is None:
+            llm = get_chat_model(api_key=api_key)
+        else:
+            llm = chat_model
         response = llm.invoke(prompt)
-        raw_answer = (response.content or "").strip()
+        t_llm = time.perf_counter() - t_llm_start
+        print(f"[RAG] LLM generation completed in {t_llm:.2f}s")
+        
+        def _extract_text(content: Any) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict) and "text" in item:
+                        parts.append(str(item["text"]))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                return " ".join(parts).strip()
+            return str(content or "")
+
+        raw_answer = _extract_text(response.content).strip()
 
         # Check for 'Not found'
         normalized = raw_answer.lower().replace(".", "").strip()

@@ -38,7 +38,18 @@ def get_clean_key(api_key: str = None) -> str:
         or ""
     )
     clean = raw.strip().strip("'\"").strip()
-    if clean.startswith("your_") or "placeholder" in clean.lower():
+    # Strip accidental environment variable prefix (e.g. GEMINI_API_KEY= or GOOGLE_API_KEY=)
+    if clean.startswith("GEMINI_API_KEY="):
+        clean = clean[len("GEMINI_API_KEY="):].strip().strip("'\"").strip()
+    if clean.startswith("GOOGLE_API_KEY="):
+        clean = clean[len("GOOGLE_API_KEY="):].strip().strip("'\"").strip()
+
+    if (
+        clean.startswith("your_")
+        or "placeholder" in clean.lower()
+        or "your_actual_key_here" in clean.lower()
+        or "paste_" in clean.lower()
+    ):
         return ""
     return clean
 
@@ -64,6 +75,8 @@ def get_embedding_model(api_key: str = None):
         return GoogleGenerativeAIEmbeddings(
             model=model_name,
             google_api_key=clean_key,
+            client_args={"timeout": 30},
+            max_retries=2,
         )
     except Exception as e:
         err_str = str(e)

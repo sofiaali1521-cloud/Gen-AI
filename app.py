@@ -19,7 +19,32 @@ from ingest import (
     load_and_split_pdf,
     get_clean_key,
 )
-from rag import answer_question
+from rag import (
+    answer_question,
+    get_vectorstore,
+    get_chat_model,
+    clear_vectorstore_cache,
+)
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_vectorstore(api_key: str):
+    """Caches ChromaDB vectorstore across Streamlit reruns for the given API key."""
+    return get_vectorstore(api_key=api_key, persist_dir=DEFAULT_PERSIST_DIR)
+
+
+@st.cache_resource(show_spinner=False)
+def get_cached_chat_model(api_key: str):
+    """Caches ChatGoogleGenerativeAI across Streamlit reruns for the given API key."""
+    return get_chat_model(api_key=api_key)
+
+
+def invalidate_app_caches():
+    """Invalidates cached vectorstore and chat model after re-indexing."""
+    get_cached_vectorstore.clear()
+    get_cached_chat_model.clear()
+    clear_vectorstore_cache()
+
 
 # 1. Page Configuration
 st.set_page_config(
@@ -38,6 +63,8 @@ if "messages" not in st.session_state:
 
 if "gemini_api_key" not in st.session_state:
     st.session_state.gemini_api_key = get_clean_key()
+else:
+    st.session_state.gemini_api_key = get_clean_key(st.session_state.gemini_api_key) or get_clean_key()
 
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
@@ -772,12 +799,12 @@ with st.sidebar:
 
     # API Key Configuration
     st.markdown('<div class="sidebar-sec-label">🔑 Model Credentials</div>', unsafe_allow_html=True)
-    current_key = st.session_state.gemini_api_key or get_clean_key()
+    current_key = get_clean_key(st.session_state.gemini_api_key) or get_clean_key()
     key_input = st.text_input(
         "Google Gemini API Key",
         value=current_key,
         type="password",
-        placeholder="Paste AIzaSy... here",
+        placeholder="Paste your Gemini API key here",
         help="Obtain your API key at https://aistudio.google.com/",
         label_visibility="collapsed",
         key="gemini_api_key_input",
@@ -789,8 +816,18 @@ with st.sidebar:
             os.environ["GEMINI_API_KEY"] = clean_val
             os.environ["GOOGLE_API_KEY"] = clean_val
 
-    active_key = st.session_state.gemini_api_key or get_clean_key()
+    active_key = get_clean_key(st.session_state.gemini_api_key) or get_clean_key()
     if active_key:
+        if os.path.exists(".env"):
+            try:
+                with open(".env", "r") as _f:
+                    _c = _f.read()
+                if "your_gemini_api_key_here" in _c:
+                    _c = _c.replace("your_gemini_api_key_here", active_key)
+                    with open(".env", "w") as _f:
+                        _f.write(_c)
+            except Exception:
+                pass
         masked_hint = f"({active_key[:4]}...{active_key[-2:]})" if len(active_key) > 8 else ""
         st.markdown(f'<div class="key-active-text">🟢 API Key is configured {masked_hint}</div>', unsafe_allow_html=True)
     else:
@@ -832,6 +869,7 @@ with st.sidebar:
                         force_reindex=is_force,
                         progress_callback=on_progress,
                     )
+                    invalidate_app_caches()
 
                 # Verify that ChromaDB actually contains documents
                 verified_count = check_index_status(DEFAULT_PERSIST_DIR)
@@ -943,11 +981,24 @@ with tab_assistant:
             return
 
         with st.spinner("Consulting Enso Group HR Policy Manual..."):
+            cached_vs = None
+            cached_llm = None
+            try:
+                cached_vs = get_cached_vectorstore(effective_key)
+            except Exception:
+                pass
+            try:
+                cached_llm = get_cached_chat_model(effective_key)
+            except Exception:
+                pass
+
             result = answer_question(
                 question=query_text,
                 api_key=effective_key,
                 persist_dir=DEFAULT_PERSIST_DIR,
                 top_k=4,
+                vectorstore=cached_vs,
+                chat_model=cached_llm,
             )
 
         st.session_state.messages.append({
