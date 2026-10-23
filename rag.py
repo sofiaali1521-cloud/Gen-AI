@@ -38,14 +38,25 @@ Employee Question: {question}
 Helpful & Factual HR Answer (or exactly 'Not found'):"""
 
 
+_CACHED_VECTORSTORE = None
+_CACHED_KEY = None
+
+
 def get_vectorstore(api_key: str = None, persist_dir: str = DEFAULT_PERSIST_DIR):
-    """Loads existing ChromaDB vector store."""
-    embeddings = get_embedding_model(api_key=api_key)
-    return Chroma(
+    """Loads and caches existing ChromaDB vector store."""
+    global _CACHED_VECTORSTORE, _CACHED_KEY
+    clean_key = get_clean_key(api_key)
+    if _CACHED_VECTORSTORE is not None and _CACHED_KEY == clean_key:
+        return _CACHED_VECTORSTORE
+
+    embeddings = get_embedding_model(api_key=clean_key)
+    _CACHED_VECTORSTORE = Chroma(
         collection_name=COLLECTION_NAME,
         embedding_function=embeddings,
         persist_directory=persist_dir,
     )
+    _CACHED_KEY = clean_key
+    return _CACHED_VECTORSTORE
 
 
 def get_chat_model(api_key: str = None):
@@ -57,8 +68,8 @@ def get_chat_model(api_key: str = None):
             "or enter it in the Streamlit application sidebar."
         )
 
-    os.environ["GEMINI_API_KEY"] = clean_key
     os.environ["GOOGLE_API_KEY"] = clean_key
+    os.environ.pop("GEMINI_API_KEY", None)
 
     model_name = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.8-flash")
     try:
@@ -66,6 +77,8 @@ def get_chat_model(api_key: str = None):
             model=model_name,
             google_api_key=clean_key,
             temperature=0.0,
+            max_retries=2,
+            timeout=20,
         )
     except Exception as e:
         err_str = str(e)
@@ -165,8 +178,23 @@ def answer_question(
         err_msg = str(e)
         if resolved_key and resolved_key in err_msg:
             err_msg = err_msg.replace(resolved_key, "[REDACTED_API_KEY]")
+
+        if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower() or "rate limit" in err_msg.lower():
+            friendly_answer = (
+                "⚠️ **Gemini Free-Tier Rate Limit (429):** Google AI Studio has temporarily throttled API requests "
+                "because all 279 manual chunks were just embedded in bulk. Please wait ~30-60 seconds for the free-tier "
+                "1-minute quota window to roll over, then click your question again."
+            )
+        elif "API_KEY_INVALID" in err_msg or "api key not valid" in err_msg.lower():
+            friendly_answer = (
+                "❌ **Invalid API Key:** Google AI Studio rejected this key with `API_KEY_INVALID`. "
+                "Please verify your key at https://aistudio.google.com/ and replace it in the left sidebar."
+            )
+        else:
+            friendly_answer = f"Error consulting manual: {err_msg}"
+
         return {
-            "answer": f"Error answering question: {err_msg}",
+            "answer": friendly_answer,
             "sources": [],
             "is_found": False,
             "error": err_msg,

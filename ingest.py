@@ -52,9 +52,9 @@ def get_embedding_model(api_key: str = None):
             "Streamlit application sidebar or set GEMINI_API_KEY in your local .env file."
         )
 
-    # Sync environment variables for underlying Google SDKs
-    os.environ["GEMINI_API_KEY"] = clean_key
+    # Sync environment variables cleanly (set only GOOGLE_API_KEY to avoid dual-key warning)
     os.environ["GOOGLE_API_KEY"] = clean_key
+    os.environ.pop("GEMINI_API_KEY", None)
 
     model_name = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001").strip()
     if not model_name.startswith("models/"):
