@@ -1,0 +1,24 @@
+# Core Web UI
+streamlit>=1.66.0
+
+# LangChain Orchestration & Community Integrations
+langchain>=1.4.0
+langchain-core>=1.7.0
+langchain-community>=0.4.0
+
+# Vector Store & Embeddings Integration
+langchain-chroma>=1.1.0
+chromadb>=1.5.0
+
+# Google Gemini Provider Integration
+langchain-google-genai>=4.4.0
+google-genai>=2.3.0
+
+# Document Ingestion (PDF extraction)
+pypdf>=6.21.0
+
+# Environment Variable Management
+python-dotenv>=1.2.0
+
+# Testing
+pytest>=9.1.0

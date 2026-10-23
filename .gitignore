@@ -1,0 +1,31 @@
+# Ignore virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Ignore environment variables and credentials
+.env
+.env.*
+!.env.example
+
+# Python bytecode, builds, and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Chroma vector database storage (keep folder tracked via .gitkeep)
+chroma_db/*
+!chroma_db/.gitkeep
+
+# Exclude large PDF documents from Git repository
+data/*.pdf
+!data/.gitkeep
+
+# Operating system files
+.DS_Store
+Thumbs.db
