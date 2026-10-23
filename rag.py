@@ -16,6 +16,7 @@ from ingest import (
     COLLECTION_NAME,
     get_embedding_model,
     check_index_status,
+    get_clean_key,
 )
 
 SYSTEM_PROMPT = """You are the official HR Policy Assistant for Enso Group. Your task is to answer employee HR questions accurately, professionally, and factually, strictly relying on the provided excerpts from the Enso Group HR Policy Manual.
@@ -49,18 +50,16 @@ def get_vectorstore(api_key: str = None, persist_dir: str = DEFAULT_PERSIST_DIR)
 
 def get_chat_model(api_key: str = None):
     """Initializes ChatGoogleGenerativeAI with deterministic temperature."""
-    resolved_key = (
-        api_key
-        or os.getenv("GEMINI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    )
-    if not resolved_key or not resolved_key.strip():
+    clean_key = get_clean_key(api_key)
+    if not clean_key:
         raise ValueError(
             "Missing Gemini API Key. Please configure GEMINI_API_KEY in your .env file "
             "or enter it in the Streamlit application sidebar."
         )
 
-    clean_key = resolved_key.strip()
+    os.environ["GEMINI_API_KEY"] = clean_key
+    os.environ["GOOGLE_API_KEY"] = clean_key
+
     model_name = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.8-flash")
     try:
         return ChatGoogleGenerativeAI(

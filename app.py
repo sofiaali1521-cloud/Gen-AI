@@ -17,6 +17,7 @@ from ingest import (
     build_vectorstore,
     check_index_status,
     load_and_split_pdf,
+    get_clean_key,
 )
 from rag import answer_question
 
@@ -36,7 +37,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "gemini_api_key" not in st.session_state:
-    st.session_state.gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    st.session_state.gemini_api_key = get_clean_key()
 
 if "pending_query" not in st.session_state:
     st.session_state.pending_query = None
@@ -771,23 +772,29 @@ with st.sidebar:
 
     # API Key Configuration
     st.markdown('<div class="sidebar-sec-label">🔑 Model Credentials</div>', unsafe_allow_html=True)
+    current_key = st.session_state.gemini_api_key or get_clean_key()
     key_input = st.text_input(
         "Google Gemini API Key",
-        value=st.session_state.gemini_api_key,
+        value=current_key,
         type="password",
-        placeholder="AIzaSy...",
+        placeholder="Paste AIzaSy... here",
         help="Obtain your API key at https://aistudio.google.com/",
         label_visibility="collapsed",
+        key="gemini_api_key_input",
     )
-    if key_input:
-        st.session_state.gemini_api_key = key_input.strip()
-        os.environ["GEMINI_API_KEY"] = st.session_state.gemini_api_key
+    clean_val = get_clean_key(key_input)
+    if clean_val != st.session_state.gemini_api_key:
+        st.session_state.gemini_api_key = clean_val
+        if clean_val:
+            os.environ["GEMINI_API_KEY"] = clean_val
+            os.environ["GOOGLE_API_KEY"] = clean_val
 
-    active_key = st.session_state.gemini_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    active_key = st.session_state.gemini_api_key or get_clean_key()
     if active_key:
-        st.markdown('<div class="key-active-text">🟢 API Key is configured</div>', unsafe_allow_html=True)
+        masked_hint = f"({active_key[:4]}...{active_key[-2:]})" if len(active_key) > 8 else ""
+        st.markdown(f'<div class="key-active-text">🟢 API Key is configured {masked_hint}</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="key-inactive-text">⚠️ API Key required. Enter above or set in .env</div>', unsafe_allow_html=True)
+        st.markdown('<div class="key-inactive-text">⚠️ API Key required. Paste above or save in .env</div>', unsafe_allow_html=True)
 
     # Indexing Action with Safe Resumption & Verification
     st.markdown('<div class="sidebar-sec-label">⚡ Index Actions</div>', unsafe_allow_html=True)
@@ -803,7 +810,7 @@ with st.sidebar:
 
     if st.button(index_btn_label, use_container_width=True, key="index_manual_btn"):
         if not active_key:
-            st.error("❌ Action Required: Enter your Google Gemini API Key above before indexing.")
+            st.error("❌ Action Required: Please enter your Google Gemini API Key above before indexing.")
         elif not pdf_exists:
             st.error(f"❌ Missing manual: `{DEFAULT_PDF_PATH}` not found on disk.")
         else:
@@ -840,9 +847,15 @@ with st.sidebar:
                     st.error("❌ Verification failed: ChromaDB returned 0 chunks.")
             except Exception as e:
                 err_msg = str(e)
-                if active_key in err_msg:
+                if active_key and active_key in err_msg:
                     err_msg = err_msg.replace(active_key, "[REDACTED_API_KEY]")
-                st.error(f"❌ Notice: {err_msg}")
+                if "API_KEY_INVALID" in err_msg or "api key not valid" in err_msg.lower():
+                    st.error(
+                        "❌ Invalid API Key: Google AI Studio rejected this key with `API_KEY_INVALID`. "
+                        "Please verify your key at https://aistudio.google.com/ and replace it in the field above."
+                    )
+                else:
+                    st.error(f"❌ Notice: {err_msg}")
 
     # Conversation Session Controls
     st.markdown('<div class="sidebar-sec-label">💬 Conversation</div>', unsafe_allow_html=True)

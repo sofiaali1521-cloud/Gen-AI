@@ -29,20 +29,33 @@ COLLECTION_NAME = "enso_hr_policy"
 TOTAL_EXPECTED_CHUNKS = 279
 
 
-def get_embedding_model(api_key: str = None):
-    """Initializes GoogleGenerativeAIEmbeddings using GEMINI_API_KEY or GOOGLE_API_KEY."""
-    resolved_key = (
+def get_clean_key(api_key: str = None) -> str:
+    """Helper to extract and sanitize API key, filtering out placeholder strings."""
+    raw = (
         api_key
         or os.getenv("GEMINI_API_KEY")
         or os.getenv("GOOGLE_API_KEY")
+        or ""
     )
-    if not resolved_key or not resolved_key.strip():
+    clean = raw.strip().strip("'\"").strip()
+    if clean.startswith("your_") or "placeholder" in clean.lower():
+        return ""
+    return clean
+
+
+def get_embedding_model(api_key: str = None):
+    """Initializes GoogleGenerativeAIEmbeddings using GEMINI_API_KEY or GOOGLE_API_KEY."""
+    clean_key = get_clean_key(api_key)
+    if not clean_key:
         raise ValueError(
-            "Missing Gemini API Key. Please enter your Gemini API Key in the Streamlit application sidebar "
-            "or set GEMINI_API_KEY in your local .env file."
+            "Missing or unconfigured Gemini API Key. Please enter your valid Gemini API Key in the "
+            "Streamlit application sidebar or set GEMINI_API_KEY in your local .env file."
         )
 
-    clean_key = resolved_key.strip()
+    # Sync environment variables for underlying Google SDKs
+    os.environ["GEMINI_API_KEY"] = clean_key
+    os.environ["GOOGLE_API_KEY"] = clean_key
+
     model_name = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001").strip()
     if not model_name.startswith("models/"):
         model_name = f"models/{model_name}"
@@ -193,6 +206,19 @@ def build_vectorstore(
                 break
             except Exception as e:
                 err_str = str(e)
+                # Check specifically for invalid API key
+                is_invalid_key = (
+                    "API_KEY_INVALID" in err_str
+                    or "api key not valid" in err_str.lower()
+                    or "invalid api key" in err_str.lower()
+                    or "unregistered callers" in err_str.lower()
+                )
+                if is_invalid_key:
+                    raise ValueError(
+                        "API_KEY_INVALID: The Google Gemini API key is invalid, inactive, or expired. "
+                        "Please verify your key at https://aistudio.google.com/ and update it in the sidebar."
+                    )
+
                 is_rate_limit = (
                     "429" in err_str
                     or "RESOURCE_EXHAUSTED" in err_str
@@ -213,7 +239,7 @@ def build_vectorstore(
                 else:
                     safe_err = err_str.replace(clean_key, "[REDACTED_API_KEY]") if clean_key in err_str else err_str
                     raise RuntimeError(
-                        f"Gemini embedding quota limit: {safe_err}. "
+                        f"Embedding error: {safe_err}. "
                         f"Successfully persisted {existing_count + b_start}/{total_expected} chunks in ChromaDB. "
                         f"You can resume indexing safely without losing progress."
                     ) from None
